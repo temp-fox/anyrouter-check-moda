@@ -1,0 +1,64 @@
+name: Cleanup Workflow Runs
+
+on:
+  # 手动触发清理流程记录
+  workflow_dispatch:
+
+jobs:
+  cleanup-runs:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write   # 需要写权限才能删除 workflow runs
+      contents: read
+
+    steps:
+      - name: 清理历史流程记录（跳过运行中和等待中）
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const perPage = 100;
+            let page = 1;
+            let deleted = 0;
+            let total = 0;
+
+            while (true) {
+              const { data } = await github.rest.actions.listWorkflowRunsForRepo({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                per_page: perPage,
+                page,
+              });
+
+              const runs = data.workflow_runs;
+              if (!runs.length) {
+                break;
+              }
+
+              for (const run of runs) {
+                total++;
+                // 只删除已完成的流程，跳过正在运行和排队中的流程
+                if (run.status !== 'completed') {
+                  core.info(`Skip run ${run.id} (${run.name}) with status=${run.status}`);
+                  continue;
+                }
+
+                try {
+                  await github.rest.actions.deleteWorkflowRun({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    run_id: run.id,
+                  });
+                  deleted++;
+                  core.info(`Deleted run ${run.id} (${run.name}) status=${run.status} conclusion=${run.conclusion}`);
+                } catch (error) {
+                  core.warning(`Failed to delete run ${run.id}: ${error.message}`);
+                }
+              }
+
+              page++;
+            }
+
+            core.summary.addHeading('Workflow runs cleanup summary');
+            core.summary.addRaw(`Total scanned: ${total}`);
+            core.summary.addRaw(`\nDeleted: ${deleted}`).write();
