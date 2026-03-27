@@ -5,6 +5,7 @@ ModelScope 魔搭社区自动签到脚本
 """
 
 import asyncio
+import re
 import os
 import sys
 from datetime import datetime
@@ -17,6 +18,32 @@ from utils.notify import notify
 load_dotenv()
 
 MODELSCOPE_DOMAIN = 'https://modelscope.cn'
+
+
+def mask_username(name: str) -> str:
+	"""打码用户名，仅保留首尾字符，其余用*代替"""
+	if not name:
+		return '****'
+	name = str(name)
+	if len(name) <= 2:
+		return name[0] + '***'
+	return name[0] + '***' + name[-1]
+
+
+def mask_email(email: str) -> str:
+	"""打码邮箱，仅保留部分本地名和完整域名"""
+	if not email or '@' not in email:
+		return '****'
+	email = str(email)
+	local, domain = email.split('@', 1)
+	if not local:
+		return f'****@{domain}'
+	if len(local) <= 2:
+		masked_local = local[0] + '***'
+	else:
+		masked_local = local[0] + '***' + local[-1]
+	return f'{masked_local}@{domain}'
+
 
 
 def parse_cookies(cookies_str: str) -> list[dict]:
@@ -81,7 +108,9 @@ async def check_in(account_name: str, cookies_str: str) -> tuple[bool, dict]:
 
 			current_url = page.url
 			title = await page.title()
-			print(f'[INFO] {account_name}: Page title: {title}, URL: {current_url}')
+			masked_url = re.sub(r'(modelscope\.cn/u/)([^/?#]+)', lambda m: m.group(1) + mask_username(m.group(2)), current_url)
+
+			print(f'[INFO] {account_name}: Page title: {title}, URL: {masked_url}')
 
 			# 检查是否被重定向到登录页
 			if 'login' in current_url or 'passport' in current_url:
@@ -91,7 +120,8 @@ async def check_in(account_name: str, cookies_str: str) -> tuple[bool, dict]:
 
 			# 验证登录状态
 			if login_info.get('Name'):
-				print(f'[SUCCESS] {account_name}: Login successful (user: {login_info["Name"]})')
+				masked_name = mask_username(login_info["Name"])
+				print(f'[SUCCESS] {account_name}: Login successful (user: {masked_name})')
 				await browser.close()
 				return True, login_info
 
@@ -139,7 +169,9 @@ async def main():
 				success_count += 1
 				user_display = login_info.get('Name', 'Unknown')
 				email = login_info.get('Email', 'N/A')
-				result = f'[SUCCESS] {account_name}: {user_display} ({email})'
+				masked_name = mask_username(user_display)
+				masked_email = mask_email(email)
+				result = f'[SUCCESS] {account_name}: {masked_name} ({masked_email})'
 			else:
 				result = f'[FAIL] {account_name}: Check-in failed'
 				notification_content.append(result)
